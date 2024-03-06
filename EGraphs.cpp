@@ -1,5 +1,7 @@
 #include <iostream>
 #include <map>
+#include <z3++.h>
+using namespace z3;
 #include <vector>
 
 
@@ -7,7 +9,6 @@ namespace Extensions
 {
 	class Function
 	{
-		
 		public: std::string Name;
 		std::vector<Function*>* UsedBy;
 		Function* Parent;
@@ -23,6 +24,14 @@ namespace Extensions
 			{
 				func->UsedBy->push_back(this);
 			}
+		}
+
+		Function()
+		{
+			this->Name = "";
+			this->UsedBy = new std::vector<Function*>();
+			this->Parent = this;
+			this->Inputs = new std::vector<Function*>();
 		}
 
 		void ManualDestroy()
@@ -75,7 +84,7 @@ namespace Extensions
 			{
 				return false;
 			}
-			for (int i = 0; i < this->Inputs->size(); i++)
+			for (size_t i = 0; i < this->Inputs->size(); i++)
 			{
 				if (!(*(*(this->Inputs))[i] == *(*(other.Inputs))[i]))
 				{
@@ -83,6 +92,26 @@ namespace Extensions
 				}
 			}
 			return true;
+		}
+
+		bool operator<(const Function& other) const
+		{
+			if (this->Name != other.Name)
+			{
+				return this->Name < other.Name;
+			}
+			if (this->Inputs->size() != other.Inputs->size())
+			{
+				return this->Inputs->size() < other.Inputs->size();
+			}
+			for (size_t i = 0; i < this->Inputs->size(); i++)
+			{
+				if (this->Inputs[i] != other.Inputs[i])
+				{
+					return this->Inputs[i] < other.Inputs[i];
+				}
+			}
+			return false;
 		}
 
 		bool operator!=(const Function& other) const
@@ -121,7 +150,13 @@ namespace Extensions
 		std::vector<Function*> _in_equalities;
 		std::vector<Function*> _quantified_variables;
 
-	public: EGraph()
+	public: static expr Simplify(expr expression)
+		{
+			
+			return expression;
+		}
+
+		public: EGraph()
 		{
 			this->_quantified_variables = std::vector<Function*>();
 			this->_functions = std::map<std::string, std::vector<Function*>*>{};
@@ -272,7 +307,7 @@ namespace Extensions
 		std::map<Function, Function>* AssignRepresentatives(std::map<Function, Function>* repr, std::vector<Function*> toBeAssigned)
 		{
 			// iterate through functions and terms while possible
-			for (int i = 0; i < toBeAssigned.size(); i++)
+			for (size_t i = 0; i < toBeAssigned.size(); i++)
 			{
 				Function* function = toBeAssigned[i];
 				// if they have a representative, skip
@@ -309,7 +344,7 @@ namespace Extensions
 
 		void AddPredicate(std::vector<Function*>* functions, std::string name)
 		{
-			for (int i = 0; i < functions->size(); i++)
+			for (size_t i = 0; i < functions->size(); i++)
 			{
 				Function* oldFunction = (*functions)[i];
 				if (TryGetRealFunction(*oldFunction, this->_functions, *(*functions)[i]))
@@ -376,5 +411,10 @@ namespace Tests
 int main(int argc, char* argv[])
 {
 	Tests::Tests();
+	z3::config* con = new z3::config();
+	con->set("a", 5);
+	z3::context* asd = new z3::context(*con);
+	z3::expr* temp = new z3::expr(*asd);
+	std::cout << temp->to_string() << std::endl ;
 	return 0;
 }
