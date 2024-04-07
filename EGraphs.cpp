@@ -1,7 +1,5 @@
 #include <iostream>
 #include <map>
-#include <z3++.h>
-using namespace z3;
 #include <vector>
 
 
@@ -106,9 +104,9 @@ namespace Extensions
 			}
 			for (size_t i = 0; i < this->Inputs->size(); i++)
 			{
-				if (this->Inputs[i] != other.Inputs[i])
+				if (*(*this->Inputs)[i] != *(*other.Inputs)[i])
 				{
-					return this->Inputs[i] < other.Inputs[i];
+					return *(*this->Inputs)[i] < *(*other.Inputs)[i];
 				}
 			}
 			return false;
@@ -119,23 +117,39 @@ namespace Extensions
 			return !(*this == other);
 		}
 
-		bool IsEquivalent(const Function& other)
+		bool IsEquivalent(Function other)
 		{
+			if (this->GetRoot() == other.GetRoot())
+			{
+				return true;
+			}
+			if (this->getName() != other.getName())
+			{
+				return false;
+			}
+			for (size_t i = 0; i < this->Inputs->size(); i++)
+			{
+				if ((*this->Inputs)[i]->GetRoot() != (*other.Inputs)[i]->GetRoot())
+				{
+					return false;
+				}
+			}
+			return true;
 
 		}
 	};
 
-	bool TryGetRealFunction(Function function, std::map<std::string, std::vector<Function*>*> functions, Function& outFunction)
+	bool TryGetRealFunction(Function* function, std::map<std::string, std::vector<Function*>*> functions, Function** outFunction)
 	{
-		if (functions.find(function.getName()) == functions.end())
+		if (functions.find(function->getName()) == functions.end())
 		{
 			return false;
 		}
-		for (Function* realFunction : *functions[function.getName()])
+		for (Function* realFunction : *functions[function->getName()])
 		{
-			if (*realFunction == function)
+			if (*realFunction == *function)
 			{
-				outFunction = *realFunction;
+				*outFunction = realFunction;
 				return true;
 			}
 		}
@@ -146,27 +160,21 @@ namespace Extensions
 	{
 
 		std::map<std::string, std::vector<Function*>*> _functions;
-		std::map<Function, std::vector<Function*>> _class;
+		std::map<Function, std::vector<Function*>*> _class;
 		std::vector<Function*> _in_equalities;
 		std::vector<Function*> _quantified_variables;
-
-	public: static expr Simplify(expr expression)
-		{
-			
-			return expression;
-		}
 
 		public: EGraph()
 		{
 			this->_quantified_variables = std::vector<Function*>();
 			this->_functions = std::map<std::string, std::vector<Function*>*>{};
 			this->_in_equalities = std::vector<Function*>();
+			this->_class = std::map<Function, std::vector<Function*>*>();
 		}
 
 		~EGraph()
 		{
-			std::map<std::string, std::vector<Function*>*>::iterator it;
-			for (it = this->_functions.begin(); it != this->_functions.end(); it++)
+			for (auto it = this->_functions.begin(); it != this->_functions.end(); it++)
 			{
 				for (Function* f : *it->second)
 				{
@@ -176,17 +184,25 @@ namespace Extensions
 				}
 				delete it->second;
 			}
-			for (Function* f : this->_in_equalities)
+			for (auto it = this->_class.begin(); it != this->_class.end(); it++)
 			{
-				delete f->Inputs;
-				delete f->UsedBy;
-				delete f;
+				delete it->second;
 			}
 		}
 
-		void SplitIntoClasses()
+		void MakeEqual(Function* first, Function* second)
 		{
-
+			if (first->GetRoot() == second->GetRoot())
+			{
+				return;
+			}
+			Function* root = second->GetRoot();
+			root->Parent = first->GetRoot();
+			// concat
+			auto asd = this->_class[*first->GetRoot()]->end();
+			this->_class[*first->GetRoot()]->insert(this->_class[*first->GetRoot()]->end(), this->_class[*root]->begin(), this->_class[*root]->end());
+			delete this->_class[*root];
+			this->_class.erase(*root);
 		}
 
 		void AddQuantifiedVariable(std:: string name)
@@ -200,6 +216,7 @@ namespace Extensions
 			{
 				Function* term = new Function(new std::vector<Function*>{}, name);
 				this->_functions[name] = new std::vector<Function*>{ term }; // if term didn't exist, make it
+				this->_class[*this->_functions[name]->at(0)] = new std::vector<Function*>{ term };
 			}
 			return this->_functions[name]->at(0);
 		}
@@ -210,6 +227,7 @@ namespace Extensions
 			{
 				Function* func = new Function(inputs, name);
 				this->_functions[name] = new std::vector<Function*>{ func }; // if function didn't exist, make it
+				this->_class[*this->_functions[name]->at(0)] = new std::vector<Function*>{ func };
 				return this->_functions[name]->at(0);
 			}
 			Function* temporary = new Function(inputs, name);
@@ -222,26 +240,48 @@ namespace Extensions
 				}
 			}
 			this->_functions[name]->push_back(temporary);
+			this->_class[*this->_functions[name]->back()] = new std::vector<Function*>{temporary};
+			CheckEqualities(temporary);
 			return temporary;
 		}
 
-		void AddEquality(Function first, Function second)
+		void CheckEqualities(Function* func)
 		{
-			Function realFirst = first;
-			if (TryGetRealFunction(first, this->_functions, realFirst))
+			for (size_t i = 0; i < this->_functions[func->getName()]->size() - 1; i++)
+			{
+				if (func->IsEquivalent(*(*this->_functions[func->getName()])[i]))
+				{
+					MakeEqual(func, (*this->_functions[func->getName()])[i]);
+				}
+			}
+		}
+
+		void AddEquality(Function* first, Function* second)
+		{
+			Function* realFirst = first;
+			if (TryGetRealFunction(first, this->_functions, &realFirst))
 			{
 				// delete &first;
 			}
 
-			Function realSecond = second;
-			if (TryGetRealFunction(second, this->_functions, realSecond))
+			Function* realSecond = second;
+			if (TryGetRealFunction(second, this->_functions, &realSecond))
 			{
 				// delete &second;
 			}
-			std::vector<Function*>* equality = new std::vector<Function*>{ &realFirst, &realSecond };
-			Function* eq = new Function(equality, "eq");
+			std::vector<Function*>* equality = new std::vector<Function*>{ realFirst, realSecond };
+			Function* eq = this->AddFunction(equality, "eq");
 			this->_in_equalities.push_back(eq);
-			realSecond.GetRoot()->Parent = realFirst.GetRoot();
+
+			MakeEqual(realFirst, realSecond);
+			for (Function* func : *realFirst->UsedBy)
+			{
+				CheckEqualities(func);
+			}
+			for (Function* func : *realSecond->UsedBy)
+			{
+				CheckEqualities(func);
+			}
 		}
 
 		bool IsGround(Function* function)
@@ -315,7 +355,7 @@ namespace Extensions
 				{
 					continue;
 				}
-				for (Function* func : _class[*function])
+				for (Function* func : *_class[*function->GetRoot()])
 				{
 					// set the representative of everything equivalent to self
 					(*repr)[*func] = *function;
@@ -347,12 +387,13 @@ namespace Extensions
 			for (size_t i = 0; i < functions->size(); i++)
 			{
 				Function* oldFunction = (*functions)[i];
-				if (TryGetRealFunction(*oldFunction, this->_functions, *(*functions)[i]))
+				if (TryGetRealFunction(oldFunction, this->_functions, &(*functions)[i]))
 				{
 					// delete
 				}
 			}
-			this->_in_equalities.push_back(new Function(functions, name));
+			Function* newFunc = this->AddFunction(functions, name);
+			this->_in_equalities.push_back(newFunc);
 		}
 	};
 }
@@ -388,6 +429,20 @@ namespace Tests
 		assert(*f != *h);
 	}
 
+	void SimplifyTest()
+	{
+		EGraph graph = EGraph();
+		graph.AddQuantifiedVariable("x");
+		graph.AddQuantifiedVariable("y");
+		graph.AddQuantifiedVariable("z");
+		graph.AddEquality(graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("a"), graph.AddTerm("x") }, "read"), graph.AddTerm("z"));
+		graph.AddEquality(graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("k"), graph.AddTerm("1") }, "+"), 
+					      graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("a"), graph.AddTerm("y") }, "read"));
+		graph.AddEquality(graph.AddTerm("x"), graph.AddTerm("y"));
+		graph.AddPredicate(new std::vector<Function*>{ graph.AddTerm("3"), graph.AddTerm("z") }, ">");
+
+	}
+
 	void AddPredicateTest()
 	{
 		EGraph graph = EGraph();
@@ -397,13 +452,14 @@ namespace Tests
 		Function* f = graph.AddFunction(new std::vector<Function*>{ a, b }, "f");
 		Function* h = graph.AddFunction(new std::vector<Function*>{ b, a }, "f");
 
-		graph.AddEquality(*f, *h);
+		graph.AddEquality(f, h);
 	}
 
 	void Tests()
 	{
 		TermInequalityTest();
 		FunctionEqualityTest();
+		SimplifyTest();
 		AddPredicateTest();
 	}
 }
@@ -411,10 +467,5 @@ namespace Tests
 int main(int argc, char* argv[])
 {
 	Tests::Tests();
-	z3::config* con = new z3::config();
-	con->set("a", 5);
-	z3::context* asd = new z3::context(*con);
-	z3::expr* temp = new z3::expr(*asd);
-	std::cout << temp->to_string() << std::endl ;
 	return 0;
 }
