@@ -565,7 +565,14 @@ namespace Tests
 		graph.AddEquality(graph.AddTerm("y"), graph.AddFunction(new std::vector<Function*>{ graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("y") }, "f") }, "h"));
 		graph.AddEquality(graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("x") }, "f"), graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("y") }, "f"));
 		auto repr = graph.FindDefs();
+
+		assert((*repr)[*graph.AddTerm("x")] == graph.AddTerm("x") && (*repr)[*graph.AddTerm("y")] == graph.AddTerm("y"));
+
 		repr = graph.RefineDefs(repr);
+
+		assert((*repr)[*graph.AddTerm("x")] != graph.AddTerm("x") || (*repr)[*graph.AddTerm("y")] != graph.AddTerm("y"));
+
+		delete repr;
 	}
 
 	void AddPredicateTest()
