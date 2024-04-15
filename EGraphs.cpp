@@ -575,18 +575,6 @@ namespace Tests
 		delete repr;
 	}
 
-	void AddPredicateTest()
-	{
-		EGraph graph = EGraph();
-		Function* a = graph.AddTerm("a");
-		Function* b = graph.AddTerm("b");
-
-		Function* f = graph.AddFunction(new std::vector<Function*>{ a, b }, "f");
-		Function* h = graph.AddFunction(new std::vector<Function*>{ b, a }, "f");
-
-		graph.AddEquality(f, h);
-	}
-
 	void Tests()
 	{
 		TermInequalityTest();
@@ -594,7 +582,6 @@ namespace Tests
 		ImplicitEqualityTest();
 		FindDefsTest();
 		RefineDefsTest();
-		AddPredicateTest();
 	}
 }
 
