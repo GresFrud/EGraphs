@@ -39,7 +39,7 @@ namespace Extensions
 			{
 				for (Function* func : *this->Inputs)
 				{
-					func->Inputs->erase(std::remove(func->Inputs->begin(), func->Inputs->end(), this), func->Inputs->end());
+					func->UsedBy->erase(std::remove(func->UsedBy->begin(), func->UsedBy->end(), this), func->UsedBy->end());
 				}
 				delete this->UsedBy;
 				delete this->Inputs;
@@ -157,12 +157,6 @@ namespace Extensions
 		return false;
 	}
 
-	bool MakesCycle(Function* NewGround, std::map<Function, Function*>* repr)
-	{
-
-		return false;
-	}
-
 	class EGraph
 	{
 
@@ -273,13 +267,19 @@ namespace Extensions
 			Function* realFirst = first;
 			if (TryGetRealFunction(first, this->_functions, &realFirst))
 			{
-				// delete &first;
+				if (first != realFirst)
+				{
+					first->ManualDestroy();
+				}
 			}
 
 			Function* realSecond = second;
 			if (TryGetRealFunction(second, this->_functions, &realSecond))
 			{
-				// delete &second;
+				if (second != realSecond)
+				{
+					second->ManualDestroy();
+				}
 			}
 			std::vector<Function*>* equality = new std::vector<Function*>{ realFirst, realSecond };
 			Function* eq = this->AddFunction(equality, "eq");
@@ -334,7 +334,7 @@ namespace Extensions
 			{
 				for (Function* function : *pair->second)
 				{
-					if (IsGround(function))
+					if (IsGround(function) && function->Inputs->size() == 0)
 					{
 						groundTerms.push_back(function);
 					}
@@ -348,7 +348,10 @@ namespace Extensions
 			{
 				for (Function* function : *pair->second)
 				{
-					leftoverTerms.push_back(function);
+					if (function->Inputs->size() == 0)
+					{
+						leftoverTerms.push_back(function);
+					}
 				}
 			}
 			repr = AssignRepresentatives(repr, leftoverTerms);
@@ -394,6 +397,54 @@ namespace Extensions
 			return repr;
 		}
 
+		bool MakesCycle(Function* NewGround, std::map<Function, Function*>* repr)
+		{
+			std::map<Function*, bool>* ColoredGraph = new std::map<Function*, bool>();
+
+			// initialize 0 as the value for every node of EGraph at the start
+			std::map<std::string, std::vector<Function*>*>::iterator it;
+			for (it = this->_functions.begin(); it != this->_functions.end(); it++)
+			{
+				for (Function* func : *it->second)
+				{
+					(*ColoredGraph)[func] = false;
+				}
+			}
+
+			for (Function* descendant : *NewGround->Inputs)
+			{
+				if (MakesCycleAux(NewGround, repr, descendant, ColoredGraph))
+				{
+					return true;
+				}
+			}
+
+			return false;
+		}
+
+		bool MakesCycleAux(Function* NewGround, std::map<Function, Function*>* repr, Function* current, std::map<Function*, bool>* ColoredGraph)
+		{
+			if (current->GetRoot() == NewGround->GetRoot())
+			{
+				return true;
+			}
+			current = (*repr)[*current];
+			for (Function* descendant : *current->Inputs)
+			{
+				if ((*ColoredGraph)[current])
+				{
+					continue;
+				}
+
+				if (!MakesCycleAux(NewGround, repr, descendant, ColoredGraph))
+				{
+					return true;
+				}
+				(*ColoredGraph)[current] = true;
+			}
+			return false;
+		}
+
 		std::map<Function, Function*>* RefineDefs(std::map<Function, Function*>* repr)
 		{
 			for (Function* function : this->_quantified_variables)
@@ -406,7 +457,7 @@ namespace Extensions
 
 				for (Function* InSameClass : *_class[*function])
 				{
-					if (InSameClass == function || this->_quantified_variables.count(InSameClass) != 0 || MakesCycle(InSameClass, repr))
+					if (InSameClass == function || this->_quantified_variables.count(InSameClass) != 0 || this->MakesCycle(InSameClass, repr))
 					{
 						continue; // quantified variable shouldn't be represented by self, another quantified variable and it shouldn't create a cycle
 					}
@@ -484,7 +535,7 @@ namespace Tests
 		assert(graph.GetClasses().size() == 10);
 	}
 
-	void SimplifyTest()
+	void FindDefsTest()
 	{
 		EGraph graph = EGraph();
 		graph.AddQuantifiedVariable("x");
@@ -496,6 +547,25 @@ namespace Tests
 		graph.AddEquality(graph.AddTerm("x"), graph.AddTerm("y"));
 		graph.AddPredicate(new std::vector<Function*>{ graph.AddTerm("3"), graph.AddTerm("z") }, ">");
 		auto repr = graph.FindDefs();
+
+		assert((*repr)[*graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("a"), graph.AddTerm("y") }, "read")] ==
+				graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("k"), graph.AddTerm("1") }, "+"));
+		assert((*repr)[*graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("a"), graph.AddTerm("x") }, "read")] ==
+			graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("k"), graph.AddTerm("1") }, "+"));
+		assert((*repr)[*graph.AddTerm("z")] == graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("k"), graph.AddTerm("1") }, "+"));
+		delete repr;
+	}
+
+	void RefineDefsTest()
+	{
+		EGraph graph = EGraph();
+		graph.AddQuantifiedVariable("x");
+		graph.AddQuantifiedVariable("y");
+		graph.AddEquality(graph.AddTerm("x"), graph.AddFunction(new std::vector<Function*>{ graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("x") }, "f") }, "g"));
+		graph.AddEquality(graph.AddTerm("y"), graph.AddFunction(new std::vector<Function*>{ graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("y") }, "f") }, "h"));
+		graph.AddEquality(graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("x") }, "f"), graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("y") }, "f"));
+		auto repr = graph.FindDefs();
+		repr = graph.RefineDefs(repr);
 	}
 
 	void AddPredicateTest()
@@ -514,7 +584,9 @@ namespace Tests
 	{
 		TermInequalityTest();
 		FunctionEqualityTest();
-		SimplifyTest();
+		ImplicitEqualityTest();
+		FindDefsTest();
+		RefineDefsTest();
 		AddPredicateTest();
 	}
 }
