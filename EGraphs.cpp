@@ -118,25 +118,29 @@ namespace Extensions
 			return !(*this == other);
 		}
 
-		bool IsEquivalent(Function other)
+		bool IsEquivalent(Function* other)
 		{
-			if (this->GetRoot() == other.GetRoot())
+			if (this->GetRoot() == other->GetRoot())
 			{
 				return true;
 			}
-			if (this->getName() != other.getName())
+			return this->IsCongruent(other);
+		}
+
+		bool IsCongruent(Function* other)
+		{
+			if (this->getName() != other->getName())
 			{
 				return false;
 			}
 			for (size_t i = 0; i < this->Inputs->size(); i++)
 			{
-				if ((*this->Inputs)[i]->GetRoot() != (*other.Inputs)[i]->GetRoot())
+				if ((*this->Inputs)[i]->GetRoot() != (*other->Inputs)[i]->GetRoot())
 				{
 					return false;
 				}
 			}
 			return true;
-
 		}
 	};
 
@@ -159,9 +163,8 @@ namespace Extensions
 
 	class EGraph
 	{
-
 		std::map<std::string, std::vector<Function*>*> _functions;
-		std::map<Function, std::vector<Function*>*> _class;
+		std::map<Function*, std::vector<Function*>*> _class;
 		std::vector<Function*> _in_equalities;
 		std::set<Function*> _quantified_variables;
 
@@ -170,7 +173,7 @@ namespace Extensions
 			this->_quantified_variables = std::set<Function*>();
 			this->_functions = std::map<std::string, std::vector<Function*>*>{};
 			this->_in_equalities = std::vector<Function*>();
-			this->_class = std::map<Function, std::vector<Function*>*>();
+			this->_class = std::map<Function*, std::vector<Function*>*>();
 		}
 
 		~EGraph()
@@ -191,7 +194,7 @@ namespace Extensions
 			}
 		}
 
-		std::map<Function, std::vector<Function*>*> GetClasses()
+		std::map<Function*, std::vector<Function*>*> GetClasses()
 		{
 			return _class;
 		}
@@ -205,10 +208,10 @@ namespace Extensions
 			Function* root = second->GetRoot();
 			root->Parent = first->GetRoot();
 			// concat
-			auto asd = this->_class[*first->GetRoot()]->end();
-			this->_class[*first->GetRoot()]->insert(this->_class[*first->GetRoot()]->end(), this->_class[*root]->begin(), this->_class[*root]->end());
-			delete this->_class[*root];
-			this->_class.erase(*root);
+			auto asd = this->_class[first->GetRoot()]->end();
+			this->_class[first->GetRoot()]->insert(this->_class[first->GetRoot()]->end(), this->_class[root]->begin(), this->_class[root]->end());
+			delete this->_class[root];
+			this->_class.erase(root);
 		}
 
 		void AddQuantifiedVariable(std:: string name)
@@ -222,7 +225,7 @@ namespace Extensions
 			{
 				Function* term = new Function(new std::vector<Function*>{}, name);
 				this->_functions[name] = new std::vector<Function*>{ term }; // if term didn't exist, make it
-				this->_class[*this->_functions[name]->at(0)] = new std::vector<Function*>{ term };
+				this->_class[this->_functions[name]->at(0)] = new std::vector<Function*>{ term };
 			}
 			return this->_functions[name]->at(0);
 		}
@@ -233,7 +236,7 @@ namespace Extensions
 			{
 				Function* func = new Function(inputs, name);
 				this->_functions[name] = new std::vector<Function*>{ func }; // if function didn't exist, make it
-				this->_class[*this->_functions[name]->at(0)] = new std::vector<Function*>{ func };
+				this->_class[this->_functions[name]->at(0)] = new std::vector<Function*>{ func };
 				return this->_functions[name]->at(0);
 			}
 			Function* temporary = new Function(inputs, name);
@@ -246,7 +249,7 @@ namespace Extensions
 				}
 			}
 			this->_functions[name]->push_back(temporary);
-			this->_class[*this->_functions[name]->back()] = new std::vector<Function*>{temporary};
+			this->_class[this->_functions[name]->back()] = new std::vector<Function*>{temporary};
 			CheckEqualities(temporary);
 			return temporary;
 		}
@@ -255,7 +258,7 @@ namespace Extensions
 		{
 			for (size_t i = 0; i < this->_functions[func->getName()]->size() - 1; i++)
 			{
-				if (func->IsEquivalent(*(*this->_functions[func->getName()])[i]))
+				if (func->IsEquivalent((*this->_functions[func->getName()])[i]))
 				{
 					MakeEqual(func, (*this->_functions[func->getName()])[i]);
 				}
@@ -282,7 +285,7 @@ namespace Extensions
 				}
 			}
 			std::vector<Function*>* equality = new std::vector<Function*>{ realFirst, realSecond };
-			Function* eq = this->AddFunction(equality, "eq");
+			Function* eq = this->AddFunction(equality, "=");
 			this->_in_equalities.push_back(eq);
 
 			MakeEqual(realFirst, realSecond);
@@ -294,6 +297,42 @@ namespace Extensions
 			{
 				CheckEqualities(func);
 			}
+		}
+
+		std::set<Function*>* FindCore(std::map<Function*, Function*>* repr)
+		{
+			std::set<Function*>* core = new std::set<Function*>();
+			for (auto elem : *repr)
+			{
+				if (elem.first != elem.second)
+				{
+					continue;
+				}
+				core->insert(elem.second);
+				for (Function* func : *_class[elem.second->GetRoot()])
+				{
+					if (func == elem.second || _quantified_variables.count(func) != 0)
+					{
+						continue;
+					}
+
+					bool equivalentFound = false;
+					for (Function* InCore : *core)
+					{
+						if (InCore->IsCongruent(func))
+						{
+							equivalentFound = true;
+							break;
+						}
+					}
+
+					if (!equivalentFound)
+					{
+						core->insert(func);
+					}
+				}
+			}
+			return core;
 		}
 
 		bool IsGround(Function* function)
@@ -323,10 +362,10 @@ namespace Extensions
 			return true;
 		}
 
-		std::map<Function, Function*>* FindDefs()
+		std::map<Function*, Function*>* FindDefs()
 		{
 			// Initialize representative function
-			std::map<Function, Function*>* repr = new std::map<Function, Function*>();
+			std::map<Function*, Function*>* repr = new std::map<Function*, Function*>();
 			std::vector<Function*> groundTerms = std::vector<Function*>();
 
 			// process every ground term
@@ -359,28 +398,28 @@ namespace Extensions
 			return repr;
 		}
 
-		std::map<Function, Function*>* AssignRepresentatives(std::map<Function, Function*>* repr, std::vector<Function*> toBeAssigned)
+		std::map<Function*, Function*>* AssignRepresentatives(std::map<Function*, Function*>* repr, std::vector<Function*> toBeAssigned)
 		{
 			// iterate through functions and terms while possible
 			for (size_t i = 0; i < toBeAssigned.size(); i++)
 			{
 				Function* function = toBeAssigned[i];
 				// if they have a representative, skip
-				if (repr->find(*function) != repr->end())
+				if (repr->find(function) != repr->end())
 				{
 					continue;
 				}
-				for (Function* func : *_class[*function->GetRoot()])
+				for (Function* func : *_class[function->GetRoot()])
 				{
 					// set the representative of everything equivalent to self
-					(*repr)[*func] = function;
+					(*repr)[func] = function;
 					for (Function* parent : *func->UsedBy)
 					{
 						bool isGround = true;
 						// check if parent became ground term
 						for (Function* child : *parent->Inputs)
 						{
-							if (repr->find(*child) == repr->end())
+							if (repr->find(child) == repr->end())
 							{
 								isGround = false;
 								break;
@@ -397,11 +436,11 @@ namespace Extensions
 			return repr;
 		}
 
-		bool MakesCycle(Function* NewGround, std::map<Function, Function*>* repr)
+		bool MakesCycle(Function* NewGround, std::map<Function*, Function*>* repr)
 		{
 			std::map<Function*, bool>* ColoredGraph = new std::map<Function*, bool>();
 
-			// initialize 0 as the value for every node of EGraph at the start
+			// initialize false as the value for every node of EGraph at the start
 			std::map<std::string, std::vector<Function*>*>::iterator it;
 			for (it = this->_functions.begin(); it != this->_functions.end(); it++)
 			{
@@ -422,13 +461,13 @@ namespace Extensions
 			return false;
 		}
 
-		bool MakesCycleAux(Function* NewGround, std::map<Function, Function*>* repr, Function* current, std::map<Function*, bool>* ColoredGraph)
+		bool MakesCycleAux(Function* NewGround, std::map<Function*, Function*>* repr, Function* current, std::map<Function*, bool>* ColoredGraph)
 		{
 			if (current->GetRoot() == NewGround->GetRoot())
 			{
 				return true;
 			}
-			current = (*repr)[*current];
+			current = (*repr)[current];
 			for (Function* descendant : *current->Inputs)
 			{
 				if ((*ColoredGraph)[current])
@@ -436,7 +475,7 @@ namespace Extensions
 					continue;
 				}
 
-				if (!MakesCycleAux(NewGround, repr, descendant, ColoredGraph))
+				if (MakesCycleAux(NewGround, repr, descendant, ColoredGraph))
 				{
 					return true;
 				}
@@ -445,17 +484,17 @@ namespace Extensions
 			return false;
 		}
 
-		std::map<Function, Function*>* RefineDefs(std::map<Function, Function*>* repr)
+		std::map<Function*, Function*>* RefineDefs(std::map<Function*, Function*>* repr)
 		{
 			for (Function* function : this->_quantified_variables)
 			{
-				if ((*repr)[*function] != function)
+				if ((*repr)[function] != function)
 				{
 					continue; // quantified variable already represented by something else
 				}
 				Function* NewGround = function;
 
-				for (Function* InSameClass : *_class[*function])
+				for (Function* InSameClass : *_class[function->GetRoot()])
 				{
 					if (InSameClass == function || this->_quantified_variables.count(InSameClass) != 0 || this->MakesCycle(InSameClass, repr))
 					{
@@ -465,9 +504,9 @@ namespace Extensions
 					break;
 				}
 
-				for (Function* InSameClass : *_class[*function])
+				for (Function* InSameClass : *_class[function->GetRoot()])
 				{
-					(*repr)[*InSameClass] = NewGround;
+					(*repr)[InSameClass] = NewGround;
 				}
 			}
 			return repr;
@@ -548,11 +587,11 @@ namespace Tests
 		graph.AddPredicate(new std::vector<Function*>{ graph.AddTerm("3"), graph.AddTerm("z") }, ">");
 		auto repr = graph.FindDefs();
 
-		assert((*repr)[*graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("a"), graph.AddTerm("y") }, "read")] ==
+		assert((*repr)[graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("a"), graph.AddTerm("y") }, "read")] ==
 				graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("k"), graph.AddTerm("1") }, "+"));
-		assert((*repr)[*graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("a"), graph.AddTerm("x") }, "read")] ==
+		assert((*repr)[graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("a"), graph.AddTerm("x") }, "read")] ==
 			graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("k"), graph.AddTerm("1") }, "+"));
-		assert((*repr)[*graph.AddTerm("z")] == graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("k"), graph.AddTerm("1") }, "+"));
+		assert((*repr)[graph.AddTerm("z")] == graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("k"), graph.AddTerm("1") }, "+"));
 		delete repr;
 	}
 
@@ -566,22 +605,52 @@ namespace Tests
 		graph.AddEquality(graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("x") }, "f"), graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("y") }, "f"));
 		auto repr = graph.FindDefs();
 
-		assert((*repr)[*graph.AddTerm("x")] == graph.AddTerm("x") && (*repr)[*graph.AddTerm("y")] == graph.AddTerm("y"));
+		assert((*repr)[graph.AddTerm("x")] == graph.AddTerm("x") && (*repr)[graph.AddTerm("y")] == graph.AddTerm("y"));
 
 		repr = graph.RefineDefs(repr);
 
-		assert((*repr)[*graph.AddTerm("x")] != graph.AddTerm("x") || (*repr)[*graph.AddTerm("y")] != graph.AddTerm("y"));
+		assert((*repr)[graph.AddTerm("x")] != graph.AddTerm("x") || (*repr)[graph.AddTerm("y")] != graph.AddTerm("y"));
 
+		delete repr;
+	}
+
+	void FindCoreTest()
+	{
+		EGraph graph = EGraph();
+		graph.AddQuantifiedVariable("x");
+		graph.AddQuantifiedVariable("y");
+		graph.AddEquality(graph.AddTerm("x"), graph.AddFunction(new std::vector<Function*>{ graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("x") }, "f") }, "g"));
+		graph.AddEquality(graph.AddTerm("y"), graph.AddFunction(new std::vector<Function*>{ graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("y") }, "f") }, "h"));
+		graph.AddEquality(graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("x") }, "f"), graph.AddFunction(new std::vector<Function*>{ graph.AddTerm("y") }, "f"));
+		auto repr = graph.FindDefs();
+
+		assert((*repr)[graph.AddTerm("x")] == graph.AddTerm("x") && (*repr)[graph.AddTerm("y")] == graph.AddTerm("y"));
+
+		repr = graph.RefineDefs(repr);
+
+		assert((*repr)[graph.AddTerm("x")] != graph.AddTerm("x") || (*repr)[graph.AddTerm("y")] != graph.AddTerm("y"));
+
+		auto core = graph.FindCore(repr);
+		
+		assert(core->count(graph.AddTerm("x")) + core->count(graph.AddTerm("y")) == 1);
+
+		delete core;
 		delete repr;
 	}
 
 	void Tests()
 	{
-		TermInequalityTest();
-		FunctionEqualityTest();
-		ImplicitEqualityTest();
-		FindDefsTest();
-		RefineDefsTest();
+		// There is some non-determinism due to now using pointers instead of Functions as the key to maps
+		// Hence every test is called a sufficient amount of times to assure correctness
+		for (int i = 0; i < 100; i++)
+		{
+			TermInequalityTest();
+			FunctionEqualityTest();
+			ImplicitEqualityTest();
+			FindDefsTest();
+			RefineDefsTest();
+			FindCoreTest();
+		}
 	}
 }
 
